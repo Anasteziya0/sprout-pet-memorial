@@ -5,6 +5,7 @@ from PIL import Image
 from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
+from .degradation import degradation_breakdown
 from .models import Pet, TreeSpecies
 
 
@@ -63,8 +64,32 @@ class PetAndTreeSpeciesApiTests(APITestCase):
 		self.assertTrue(response.data['photo'])
 		pet = Pet.objects.get(pk=response.data['id'])
 		self.assertEqual(pet.breed, 'Mixed')
-		self.assertEqual(pet.age_years, 8)
+		self.assertEqual(response.data['age_years'], 8)
 		self.assertTrue(pet.photo.name)
+
+	def test_pet_age_is_calculated_from_birth_and_death_dates(self):
+		response = self.client.post(reverse('pet_list_create'), {
+			'name': 'Milo',
+			'species': 'Cat',
+			'weight_kg': 4.5,
+			'birth_date': '2018-12-20',
+			'death_date': '2026-12-19',
+		})
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+		self.assertEqual(response.data['age_years'], 7)
+
+	def test_pet_death_date_cannot_precede_birth_date(self):
+		response = self.client.post(reverse('pet_list_create'), {
+			'name': 'Milo',
+			'species': 'Cat',
+			'weight_kg': 4.5,
+			'birth_date': '2018-04-12',
+			'death_date': '2018-04-11',
+		})
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('death_date', response.data)
 
 	def test_user_cannot_access_another_users_pet(self):
 		pet = Pet.objects.create(user=self.other_user, name='Other pet', species='Cat', weight_kg=4)
@@ -94,9 +119,10 @@ class PetAndTreeSpeciesApiTests(APITestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
 		pet.refresh_from_db()
-		self.assertIsNone(pet.age_years)
 		self.assertIsNone(pet.birth_date)
 		self.assertIsNone(pet.death_date)
+		self.assertEqual(pet.age_years, 8)
+		self.assertIsNone(response.data['age_years'])
 
 	def test_tree_species_are_public_and_include_recommendation_fields(self):
 		tree = TreeSpecies.objects.create(
@@ -141,6 +167,49 @@ class PetAndTreeSpeciesApiTests(APITestCase):
 		self.assertEqual(response.data['water_proximity'], '')
 		self.assertEqual(response.data['care_level_pref'], '')
 		self.assertEqual(response.data['desired_growth_time'], '')
+		self.assertEqual(response.data['weight_kg'], 4.5)
+		self.assertEqual(response.data['estimated_degradation_months'], 5.4)
+		self.assertEqual(response.data['degradation_breakdown'], {
+			'base_months': 6.0,
+			'weight_kg': 4.5,
+			'k_weight': 0.9,
+			'k_soil': 1.0,
+			'k_climate': 1.0,
+			'total_months': 5.4,
+		})
+
+	def test_degradation_model_applies_weight_soil_and_climate_factors(self):
+		self.assertEqual(
+			degradation_breakdown(5, 'Чернозём', 'Южный')['total_months'],
+			4.9,
+		)
+		self.assertEqual(
+			degradation_breakdown(20, 'Глинистая', 'Северный')['total_months'],
+			10.1,
+		)
+		self.assertEqual(
+			degradation_breakdown(20.1, 'Суглинок', 'Умеренный')['total_months'],
+			7.2,
+		)
+
+	def test_calculation_rejects_unknown_soil_or_climate(self):
+		payload = {
+			'weight': 4.5,
+			'scenario': 'Memorial tree',
+			'region': 'Northwest',
+			'climate': 'Unknown climate',
+			'soil': 'Loam',
+			'lighting': 'Partial shade',
+		}
+		response = self.client.post(reverse('calculate'), payload)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('climate', response.data)
+
+		payload['climate'] = 'Temperate'
+		payload['soil'] = 'Unknown soil'
+		response = self.client.post(reverse('calculate'), payload)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('soil', response.data)
 
 	def test_pdf_passport_contains_saved_calculation_and_pet_data(self):
 		pet = Pet.objects.create(

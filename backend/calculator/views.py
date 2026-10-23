@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from .models import CapsuleCalculation, Pet, TreeSpecies
+from .degradation import degradation_breakdown
 from .serializers import (
     CalculationRequestSerializer,
     CalculationSerializer,
@@ -39,6 +40,7 @@ class CalculateCapsuleView(views.APIView):
         # Логика подбора (упрощённый экспертный алгоритм)
         weight = data['weight']
         capsule_size = "S" if weight < 5 else ("M" if weight <= 20 else "L")
+        breakdown = degradation_breakdown(weight, data['soil'], data['climate'])
         
         # Подбор подходящего дерева из БД
         tree = TreeSpecies.objects.filter(
@@ -59,9 +61,11 @@ class CalculateCapsuleView(views.APIView):
             water_proximity=data['water_proximity'],
             care_level_pref=data['care_level_pref'],
             desired_growth_time=data['desired_growth_time'],
+            weight_kg=weight,
             recommended_capsule_material="Мицелий с прессованным торфом",
             recommended_capsule_size=f"{capsule_size} (до {weight} кг)",
-            est_degradation_time="6-8 месяцев",
+            est_degradation_time=f"{breakdown['total_months']:.1f} месяца",
+            estimated_degradation_months=breakdown['total_months'],
             recommended_tree=tree,
             comment=data['comment'],
         )
@@ -214,12 +218,13 @@ class DownloadPDFPassportView(views.APIView):
                 ('Вид', pet.species),
                 ('Порода', pet.breed),
                 ('Вес', f'{pet.weight_kg:g} кг'),
-                ('Возраст', f'{pet.age_years} лет' if pet.age_years is not None else ''),
+                ('Возраст на дату ухода', f'{pet.age_at_death_years} лет' if pet.age_at_death_years is not None else ''),
                 ('Дата рождения', pet.birth_date.strftime('%d.%m.%Y') if pet.birth_date else ''),
                 ('Дата ухода', pet.death_date.strftime('%d.%m.%Y') if pet.death_date else ''),
             ])
 
         section('Параметры, указанные пользователем', [
+            ('Вес для расчёта', f'{calculation.weight_kg:g} кг' if calculation.weight_kg is not None else (f'{pet.weight_kg:g} кг' if pet else '')),
             ('Сценарий мемориала', calculation.memorial_scenario),
             ('Регион', calculation.region),
             ('Климат', calculation.climate),
@@ -230,10 +235,25 @@ class DownloadPDFPassportView(views.APIView):
             ('Желаемый темп роста', calculation.desired_growth_time),
             ('Комментарий', calculation.comment),
         ])
+        calculation_weight = calculation.weight_kg if calculation.weight_kg is not None else (pet.weight_kg if pet else None)
+        model_description = '—'
+        if calculation_weight is not None:
+            try:
+                factors = degradation_breakdown(calculation_weight, calculation.soil_type, calculation.climate)
+            except KeyError:
+                logger.warning('Cannot reproduce biodegradation estimate for legacy calculation id=%s', calculation.pk)
+                model_description = 'Невозможно воспроизвести: неизвестная категория почвы или климата'
+            else:
+                model_description = (
+                    f"Ttotal = {factors['base_months']:g} × {factors['k_weight']:g} × "
+                    f"{factors['k_soil']:g} × {factors['k_climate']:g} = "
+                    f"{factors['total_months']:.1f} месяца"
+                )
         section('Рекомендация', [
             ('Материал капсулы', calculation.recommended_capsule_material),
             ('Размер капсулы', calculation.recommended_capsule_size),
             ('Срок разложения', calculation.est_degradation_time),
+            ('Модель срока', model_description),
             ('Рекомендуемое дерево', calculation.recommended_tree.title if calculation.recommended_tree else 'Не подобрано'),
         ])
 

@@ -15,6 +15,17 @@ class Pet(models.Model):
     def __str__(self):
         return f"{self.name} ({self.species})"
 
+    @property
+    def age_at_death_years(self):
+        if not self.birth_date or not self.death_date:
+            return None
+
+        age = self.death_date.year - self.birth_date.year
+        if (self.death_date.month, self.death_date.day) < (self.birth_date.month, self.birth_date.day):
+            age -= 1
+        return age
+
+
 class TreeSpecies(models.Model):
     title = models.CharField(max_length=100)  # Вишня обыкновенная, Сосна и т.д.
     growth_rate = models.CharField(max_length=50)  # Средняя, Быстрая
@@ -41,11 +52,13 @@ class CapsuleCalculation(models.Model):
     care_level_pref = models.CharField(max_length=100)  # Минимальный
     desired_growth_time = models.CharField(max_length=100)  # Средний
     comment = models.TextField(blank=True)
+    weight_kg = models.FloatField(null=True, blank=True)
 
     # Результаты расчета
     recommended_capsule_material = models.CharField(max_length=100, default="Мицелий / Прессованная целлюлоза")
     recommended_capsule_size = models.CharField(max_length=50, default="M (До 20 кг)")
     est_degradation_time = models.CharField(max_length=50, default="6-8 месяцев")
+    estimated_degradation_months = models.FloatField(null=True, blank=True)
     recommended_tree = models.ForeignKey(TreeSpecies, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 import { Icon } from "./App";
 import { apiRequest } from "./api";
 
+function calculateAgeAtDeath(birthDate, deathDate) {
+  if (!birthDate || !deathDate) return "";
+  const [birthYear, birthMonth, birthDay] = birthDate.split("-").map(Number);
+  const [deathYear, deathMonth, deathDay] = deathDate.split("-").map(Number);
+  if (deathDate < birthDate) return "";
+  return deathYear - birthYear - (deathMonth < birthMonth || (deathMonth === birthMonth && deathDay < birthDay) ? 1 : 0);
+}
+
 function PetEditor({ pet }) {
   const [savedPhoto, setSavedPhoto] = useState(pet.photo);
   const [form, setForm] = useState({
@@ -65,6 +73,7 @@ function PetEditor({ pet }) {
         <label>Вес, кг<input type="number" min="0.1" step="0.1" name="weight_kg" value={form.weight_kg} onChange={update} required /></label>
         <label>Дата рождения<input type="date" name="birth_date" value={form.birth_date} onChange={update} /></label>
         <label>Дата ухода<input type="date" name="death_date" value={form.death_date} onChange={update} /></label>
+        <label>Возраст на дату ухода, лет<input value={calculateAgeAtDeath(form.birth_date, form.death_date)} readOnly placeholder="Укажите обе даты" /></label>
         <label className="upload-field profile-photo-upload">
           <input type="file" accept="image/*" onChange={(event) => setForm({ ...form, photo: event.target.files?.[0] || null })} />
           <Icon name="upload" />
