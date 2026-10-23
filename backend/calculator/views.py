@@ -27,6 +27,29 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 
 logger = logging.getLogger(__name__)
 
+
+def _matching_tree_species(climate, soil, care_preference, growth_preference):
+    climate = climate.strip().casefold()
+    soil = soil.strip().casefold()
+    candidates = []
+    for tree in TreeSpecies.objects.all():
+        climates = [value.strip().casefold() for value in tree.recommended_climate.split(',')]
+        if not any(climate == value for value in climates):
+            continue
+
+        soils = [value.strip().casefold() for value in tree.recommended_soil.split(',')]
+        score = 2 if soil in soils else 0
+        if care_preference and tree.care_level.strip().casefold() == care_preference.strip().casefold():
+            score += 1
+        if growth_preference and tree.growth_rate.strip().casefold() == growth_preference.strip().casefold():
+            score += 1
+        candidates.append((score, tree.title.casefold(), tree.pk, tree))
+
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda candidate: (-candidate[0], candidate[1], candidate[2]))[0][3]
+
+
 class CalculateCapsuleView(views.APIView):
     """Принимает форму с Экрана 2 и возвращает рекомендованные параметры"""
     def post(self, request):
@@ -42,10 +65,12 @@ class CalculateCapsuleView(views.APIView):
         capsule_size = "S" if weight < 5 else ("M" if weight <= 20 else "L")
         breakdown = degradation_breakdown(weight, data['soil'], data['climate'])
         
-        # Подбор подходящего дерева из БД
-        tree = TreeSpecies.objects.filter(
-            recommended_climate__icontains=data['climate'],
-        ).first()
+        tree = _matching_tree_species(
+            data['climate'],
+            data['soil'],
+            data['care_level_pref'],
+            data['desired_growth_time'],
+        )
         pet = None
         if data.get('pet_id') is not None:
             pet = Pet.objects.get(pk=data['pet_id'])

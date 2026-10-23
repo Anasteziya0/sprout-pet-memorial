@@ -138,8 +138,34 @@ class PetAndTreeSpeciesApiTests(APITestCase):
 		response = self.client.get(reverse('tree_species_list'))
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
-		self.assertEqual(response.data[0]['id'], tree.id)
-		self.assertEqual(response.data[0]['recommended_climate'], 'Temperate')
+		tree_data = next(item for item in response.data if item['id'] == tree.id)
+		self.assertEqual(tree_data['recommended_climate'], 'Temperate')
+
+	def test_seeded_tree_catalog_covers_every_form_climate(self):
+		climate_names = ('Южный', 'Умеренный', 'Континентальный', 'Северный')
+		for climate in climate_names:
+			with self.subTest(climate=climate):
+				response = self.client.get(reverse('tree_species_list'))
+				self.assertEqual(response.status_code, status.HTTP_200_OK)
+				self.assertTrue(
+					any(climate in tree['recommended_climate'].split(', ') for tree in response.data),
+					f'No seeded trees available for climate {climate}',
+				)
+
+	def test_calculation_selects_a_tree_matching_climate_and_soil(self):
+		response = self.client.post(reverse('calculate'), {
+			'weight': 8,
+			'scenario': 'Memorial tree',
+			'region': 'South',
+			'climate': 'Южный',
+			'soil': 'Чернозём',
+			'lighting': 'Sunny',
+		})
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+		self.assertIsNotNone(response.data['recommended_tree'])
+		self.assertIn('Южный', response.data['recommended_tree']['recommended_climate'])
+		self.assertIn('Чернозём', response.data['recommended_tree']['recommended_soil'])
 
 	def test_calculation_saves_required_fields_and_owns_linked_pet(self):
 		pet = Pet.objects.create(user=self.user, name='Milo', species='Cat', weight_kg=4.5)
