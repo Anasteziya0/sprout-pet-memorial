@@ -1,0 +1,10 @@
+{
+  "description": "Calculate eco-friendly memorials for pets with biodegradable capsules and trees, featuring an interactive map and growth diary for pet owners.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

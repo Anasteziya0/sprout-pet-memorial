@@ -1,0 +1,349 @@
+# API для frontend
+
+## Общие сведения
+
+- Локальный адрес: `http://127.0.0.1:8000`
+- Префикс API: `/api/v1/`
+- Формат запросов и обычных ответов: JSON (`Content-Type: application/json`)
+- Для запросов с фото используйте `multipart/form-data`.
+- CORS разрешён для `http://localhost:5173` и `http://127.0.0.1:5173`.
+- Авторизация: JWT. Для защищённых запросов передавайте `Authorization: Bearer <access>`.
+- Каталоги пород и активных эко-зон публичные. Питомцы, посадки, dashboard и записи ухода требуют JWT. Управление эко-зонами доступно staff-администраторам.
+
+## Маршруты
+
+| Метод | Endpoint | Авторизация | Назначение |
+|---|---|---|---|
+| `POST` | `/api/v1/auth/register/` | Нет | Регистрация |
+| `POST` | `/api/v1/auth/login/` | Нет | Получение пары JWT-токенов |
+| `POST` | `/api/v1/auth/refresh/` | Нет | Обновление access-токена |
+| `GET`, `PATCH` | `/api/v1/auth/profile/` | Да | Просмотр и изменение своих данных |
+| `GET`, `POST` | `/api/v1/calculator/pets/` | Да | Список своих питомцев и создание питомца |
+| `GET`, `PUT`, `PATCH`, `DELETE` | `/api/v1/calculator/pets/{id}/` | Да | Просмотр и изменение своего питомца |
+| `GET` | `/api/v1/calculator/tree-species/` | Нет | Каталог пород деревьев |
+| `POST` | `/api/v1/calculator/calculate/` | Нет | Расчёт капсулы и рекомендация дерева |
+| `GET` | `/api/v1/calculator/{calculation_id}/pdf/` | Нет | Скачать PDF-паспорт |
+| `GET` | `/api/v1/zones/` | Нет | Список активных эко-зон |
+| `GET`, `POST` | `/api/v1/admin/zones/` | Staff | Список всех зон и создание зоны |
+| `GET`, `PUT`, `PATCH`, `DELETE` | `/api/v1/admin/zones/{id}/` | Staff | Просмотр, изменение и удаление зоны |
+| `GET` | `/api/v1/dashboard/` | Да | Посадка текущего пользователя |
+| `GET`, `POST` | `/api/v1/tracker/plantings/` | Да | Список своих посадок и создание посадки |
+| `POST` | `/api/v1/tracker/logs/add/` | Да | Добавить запись ухода за посадкой |
+
+## Регистрация
+
+`POST /api/v1/auth/register/`
+
+Тело запроса:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "strong-password",
+  "username": "user"
+}
+```
+
+`username` можно не передавать: backend использует email в качестве username.
+
+Успешный ответ, `201 Created`:
+
+```json
+{
+  "message": "Успешная регистрация",
+  "user_id": 17
+}
+```
+
+Если email уже зарегистрирован, ответ `400 Bad Request`:
+
+```json
+{
+  "error": "Пользователь с таким email уже существует"
+}
+```
+
+После регистрации токены автоматически не выдаются: вызовите login отдельно. Backend сейчас не задаёт отдельный serializer для регистрации, поэтому клиенту следует отправлять валидные email и пароль.
+
+## Вход и обновление токена
+
+`POST /api/v1/auth/login/`
+
+```json
+{
+  "email": "user@example.com",
+  "password": "strong-password"
+}
+```
+
+Успешный ответ `200 OK` от Simple JWT:
+
+```json
+{
+  "refresh": "<refresh-token>",
+  "access": "<access-token>"
+}
+```
+
+Для защищённых endpoints передавайте именно `access` токен:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+Обновление access-токена: `POST /api/v1/auth/refresh/`
+
+```json
+{
+  "refresh": "<refresh-token>"
+}
+```
+
+Ответ содержит новый `access` токен. При отсутствии или недействительности токена защищённый endpoint вернёт `401 Unauthorized`.
+
+Личный кабинет: `GET /api/v1/auth/profile/` возвращает `id`, `username`, `email` и `phone` текущего пользователя. `PATCH /api/v1/auth/profile/` изменяет переданные поля; для запроса требуется JWT.
+
+## Питомцы
+
+Все endpoints питомцев требуют авторизации. Backend автоматически назначает владельцем текущего пользователя; поле `user` клиент не передаёт.
+
+`GET /api/v1/calculator/pets/` возвращает только питомцев текущего пользователя.
+
+`POST /api/v1/calculator/pets/` создаёт питомца. `name`, `species` и `weight_kg` обязательны; `breed`, `age_years`, `birth_date`, `death_date`, `photo` необязательны. При загрузке фото используйте `multipart/form-data`; профиль питомца в личном кабинете показывает сохранённое фото и анкетные данные.
+
+```json
+{
+  "name": "Мило",
+  "species": "Кошка",
+  "breed": "Метис",
+  "weight_kg": 4.5,
+  "age_years": 8,
+  "birth_date": "2018-04-12",
+  "death_date": "2026-09-01"
+}
+```
+
+Для фото используйте `multipart/form-data`, остальные поля передаются вместе с файлом `photo`.
+
+`GET`, `PUT`, `PATCH`, `DELETE /api/v1/calculator/pets/{id}/` работают только с питомцем владельца. Чужой или отсутствующий ID вернёт `404 Not Found`. Владелец не включается в ответ.
+
+## Каталог пород деревьев
+
+`GET /api/v1/calculator/tree-species/` публичный, возвращает массив без пагинации:
+
+```json
+[
+  {
+    "id": 3,
+    "title": "Сосна",
+    "growth_rate": "Средняя",
+    "care_level": "Минимальный",
+    "lifespan": "До 100 лет",
+    "recommended_climate": "Умеренный",
+    "recommended_soil": "Суглинок",
+    "image": null
+  }
+]
+```
+
+Пустой каталог возвращается как `[]`. CRUD API пород пока нет.
+
+## Калькулятор
+
+`POST /api/v1/calculator/calculate/`
+
+Endpoint публичный. Текущие входные имена полей:
+
+| Поле | Тип | Использование backend |
+|---|---|---|
+| `weight` | number | Вес для выбора размера; если не задан, используется `10` |
+| `scenario` | string | Сохраняется как `memorial_scenario` |
+| `region` | string | Сохраняется как `region` |
+| `climate` | string | Сохраняется и используется для поиска дерева |
+| `soil` | string | Сохраняется как `soil_type` |
+| `lighting` | string | Сохраняется как `lighting` |
+| `comment` | string | Необязательный комментарий |
+
+Пример ожидаемого frontend-запроса:
+
+```json
+{
+  "weight": 12.5,
+  "scenario": "Дерево на участке",
+  "region": "Ленинградская область",
+  "climate": "Умеренный",
+  "soil": "Суглинок",
+  "lighting": "Частичная тень",
+  "comment": "Предпочтительно неприхотливое дерево"
+}
+```
+
+Размер рассчитывается по весу: меньше 5 кг — `S`, от 5 до 20 кг включительно — `M`, больше 20 кг — `L`. Backend ищет первую породу, у которой `recommended_climate` содержит переданное значение `climate`; если совпадения нет, `recommended_tree` будет `null`.
+
+`water_proximity`, `care_level_pref` и `desired_growth_time` принимаются дополнительно и по умолчанию сохраняются как пустые строки. `pet_id` необязателен: его можно передавать только в авторизованном запросе, и только если питомец принадлежит текущему пользователю. Авторизованный расчёт связывается с аккаунтом. Успешный ответ имеет код `201 Created`; `recommended_tree` — вложенный объект или `null`:
+
+```json
+{
+  "id": 42,
+  "user": null,
+  "pet": null,
+  "memorial_scenario": "Дерево на участке",
+  "region": "Ленинградская область",
+  "climate": "Умеренный",
+  "soil_type": "Суглинок",
+  "lighting": "Частичная тень",
+  "water_proximity": "",
+  "care_level_pref": "",
+  "desired_growth_time": "",
+  "comment": "Предпочтительно неприхотливое дерево",
+  "recommended_capsule_material": "Мицелий с прессованным торфом",
+  "recommended_capsule_size": "M (до 12.5 кг)",
+  "est_degradation_time": "6-8 месяцев",
+  "recommended_tree": {
+    "id": 3,
+    "title": "Сосна",
+    "growth_rate": "Средняя",
+    "care_level": "Минимальный",
+    "lifespan": "До 100 лет",
+    "image": null
+  },
+  "created_at": "2026-10-23T12:00:00Z"
+}
+```
+
+В примере значения `id`, породы и даты иллюстративные. Формат `recommended_tree` включает только `id`, `title`, `growth_rate`, `care_level`, `lifespan` и `image`.
+
+## PDF-паспорт
+
+`GET /api/v1/calculator/{calculation_id}/pdf/`
+
+Пример: `GET /api/v1/calculator/42/pdf/`.
+
+Успешный ответ имеет `Content-Type: application/pdf`; для скачивания используйте `response.blob()` во frontend. PDF формируется по сохранённому расчёту, содержит кириллический шрифт и включает анкету питомца, его фото при наличии, параметры мемориала и рекомендации. Для неизвестного ID возвращается `404 Not Found`.
+
+## Эко-зоны
+
+`GET /api/v1/zones/`
+
+Возвращает JSON-массив активных зон без пагинации. Неактивные зоны исключаются.
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Эко-парк Северный",
+    "zone_type": "Мемориальный лес",
+    "address": "Санкт-Петербург",
+    "latitude": 60.0,
+    "longitude": 30.0,
+    "has_care_service": true,
+    "rules": "Правила посещения"
+  }
+]
+```
+
+Если активных зон нет, ответ — пустой массив `[]`. Полей изображения или endpoint для фильтрации сейчас нет.
+
+Frontend показывает активные зоны на интерактивной карте OpenStreetMap по `latitude` и `longitude`, автоматически подбирая масштаб по их координатам. Для появления точки в карте создайте зону через административный API и укажите корректные координаты; зона должна иметь `is_active: true`. Для загрузки тайлов карты у пользователей должен быть доступ к интернету.
+
+### Управление зонами
+
+Для административных маршрутов нужен JWT пользователя с `is_staff=true`. Обычный авторизованный пользователь получит `403 Forbidden`.
+
+- `GET /api/v1/admin/zones/` — все зоны, включая неактивные.
+- `POST /api/v1/admin/zones/` — создать зону; обязательны `name`, `zone_type`, `address`, `latitude`, `longitude`, `rules`; `has_care_service` и `is_active` необязательны.
+- `GET /api/v1/admin/zones/{id}/` — получить зону.
+- `PUT` или `PATCH /api/v1/admin/zones/{id}/` — заменить или частично обновить зону.
+- `DELETE /api/v1/admin/zones/{id}/` — удалить зону, ответ `204 No Content`.
+
+В ответе администрирования возвращаются все поля модели, включая `is_active`.
+
+## Личный кабинет
+
+`GET /api/v1/dashboard/`
+
+Требует JWT access token. Возвращает первую посадку, связанную с расчётом текущего пользователя. В объекте посадки поля связей (`calculation`, `pet`, `tree_species`, `eco_zone`) представлены ID; `care_logs` — массив вложенных записей ухода.
+
+Если посадки нет, ответ `404 Not Found`:
+
+```json
+{
+  "message": "Активных посадок не найдено"
+}
+```
+
+Пример формы успешного ответа:
+
+```json
+{
+  "id": 8,
+  "calculation": 42,
+  "pet": 5,
+  "tree_species": 3,
+  "eco_zone": 2,
+  "planting_date": "2026-05-10",
+  "location_details": "Аллея памяти, участок А-12",
+  "initial_height_cm": 142.0,
+  "current_height_cm": 164.0,
+  "trunk_diameter_cm": 2.8,
+  "status": "Растёт",
+  "care_logs": [
+    {
+      "id": 14,
+      "event_date": "2026-10-20",
+      "title": "Полив",
+      "description": "Плановый уход",
+      "photo": null,
+      "planted_tree": 8
+    }
+  ]
+}
+```
+
+Фактические значения зависят от данных в БД. Endpoint возвращает одну первую посадку, не список. Для получения всех посадок используйте `/api/v1/tracker/plantings/`.
+
+## Посадки деревьев
+
+`GET /api/v1/tracker/plantings/` требует JWT и возвращает массив посадок только текущего пользователя.
+
+`POST /api/v1/tracker/plantings/` создаёт посадку. ID расчёта и питомца должны принадлежать текущему пользователю; питомец должен совпадать с питомцем расчёта, если он указан в расчёте. Неактивную эко-зону выбрать нельзя.
+
+```json
+{
+  "calculation": 42,
+  "pet": 5,
+  "tree_species": 3,
+  "eco_zone": 2,
+  "planting_date": "2026-05-10",
+  "location_details": "Аллея памяти, участок А-12",
+  "initial_height_cm": 142.0,
+  "current_height_cm": 142.0,
+  "trunk_diameter_cm": 2.8,
+  "status": "Растёт"
+}
+```
+
+Обязательные поля: `calculation`, `pet`, `planting_date`, `location_details`. `tree_species` и `eco_zone` могут быть `null`, остальные показатели имеют значения по умолчанию. Успешное создание возвращает `201 Created`; чужой расчёт или питомец приводит к `400 Bad Request`.
+
+## Запись ухода
+
+`POST /api/v1/tracker/logs/add/`
+
+Требует JWT access token. Если у пользователя несколько посадок, передайте ID в `planted_tree`. Если посадка одна, поле можно не указывать — backend свяжет запись с ней автоматически. Чужую посадку указать нельзя.
+
+JSON без фотографии:
+
+```json
+{
+  "planted_tree": 8,
+  "event_date": "2026-10-23",
+  "title": "Плановый осмотр",
+  "description": "Состояние хорошее"
+}
+```
+
+Обязательные поля: `event_date` (`YYYY-MM-DD`) и `title`. `description` и `photo` необязательные. Для фото отправляйте `multipart/form-data` с теми же полями и файлом `photo`.
+
+При успехе возвращается созданная запись с кодом `201 Created`, включая ID связанной посадки в `planted_tree`. Если у пользователя нет посадки, backend вернёт ошибку валидации `400 Bad Request`.
+
+Рекомендуемый поток создания данных: питомец (`/api/v1/calculator/pets/`), расчёт (`/api/v1/calculator/calculate/`), затем посадка (`/api/v1/tracker/plantings/`). После этого доступны dashboard и журнал ухода.
